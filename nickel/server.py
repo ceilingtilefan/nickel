@@ -69,6 +69,9 @@ async def require_api_key(
             raise HTTPException(status_code=403, detail="not authorized")
 
 
+FORCED_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.41 Safari/537.36"
+
+
 def _select_format(info: dict) -> tuple[str, str, dict[str, str]]:
     formats = info.get("formats") or []
     if not formats:
@@ -77,21 +80,25 @@ def _select_format(info: dict) -> tuple[str, str, dict[str, str]]:
     for f in formats_sorted:
         url = f.get("url")
         if url:
+            headers = f.get("http_headers") or info.get("http_headers") or {}
+            headers = dict(headers)
+            headers["User-Agent"] = FORCED_UA
             return (
                 url,
                 f.get("ext", "mp4"),
-                f.get("http_headers") or info.get("http_headers") or {},
+                headers,
             )
     raise ValueError("no downloadable formats with direct url found")
 
 
 def _extract(video_url: str) -> tuple[str, str, dict[str, str]]:
-    opts = {"quiet": True, "skip_download": True}
+    opts = {"quiet": True, "skip_download": True, "http_headers": {"User-Agent": FORCED_UA}}
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(video_url, download=False)
     if "url" in info and not info.get("is_live"):  # type: ignore
         headers = info.get("http_headers") or {}  # type: ignore
-        print(headers)
+        headers = dict(headers)
+        headers["User-Agent"] = FORCED_UA
         return info["url"], info.get("ext", "mp4"), headers  # type: ignore
     return _select_format(info)  # type: ignore
 
@@ -108,7 +115,7 @@ async def info():
 @app.get("/media")
 async def media(url: str, request: Request, _=Depends(require_api_key)):
     def prepare() -> Tuple[str, Iterable[bytes]]:
-        ydl_opts = {"quiet": True}
+        ydl_opts = {"quiet": True, "http_headers": {"User-Agent": FORCED_UA}}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
@@ -124,9 +131,12 @@ async def media(url: str, request: Request, _=Depends(require_api_key)):
             if "url" in info and not info.get("is_live"):  # type: ignore
                 direct = info["url"]  # type: ignore
                 ext2 = info.get("ext", "mp4")  # type: ignore
-                resp = ydl.urlopen(direct)
+                req = urllib.request.Request(direct, headers={"User-Agent": FORCED_UA})
+                resp = ydl.urlopen(req)
             else:
                 direct, ext2, hdrs = _select_format(info)  # type: ignore[arg-type]
+                hdrs = dict(hdrs)
+                hdrs["User-Agent"] = FORCED_UA
                 req = urllib.request.Request(direct, headers=hdrs)
                 resp = ydl.urlopen(req)
 
