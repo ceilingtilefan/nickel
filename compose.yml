@@ -2,8 +2,10 @@ services:
   nickel:
     container_name: nickel
     build: .
+    environment:
+      - PORT=8000
     ports:
       - "8000:8000"
-    volumes:
-      # - ./keys.json:/app/keys.json:ro
+    # volumes:
+    #   - ./keys.json:/app/keys.json:ro
     restart: unless-stopped
