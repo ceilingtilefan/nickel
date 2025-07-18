@@ -105,12 +105,21 @@ async def info():
     return {"status": "ok"}
 
 
-@app.get("/video")
-async def video(url: str, request: Request, _=Depends(require_api_key)):
+@app.get("/media")
+async def media(url: str, request: Request, _=Depends(require_api_key)):
     def prepare() -> Tuple[str, Iterable[bytes]]:
         ydl_opts = {"quiet": True}
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+
+            if info is None:
+                raise ValueError("failed to extract info from URL")
+
+            entries = info.get("entries", [])
+            if entries and len(entries) == 0:
+                raise ValueError(
+                    "no downloadable content found - this may be a photo post"
+                )
 
             if "url" in info and not info.get("is_live"):  # type: ignore
                 direct = info["url"]  # type: ignore
@@ -132,6 +141,13 @@ async def video(url: str, request: Request, _=Depends(require_api_key)):
 
     try:
         ext, reader_iter = await anyio.to_thread.run_sync(prepare)  # type: ignore
+    except ValueError as exc:
+        if "photo" in str(exc).lower():
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "photos_not_supported", "message": str(exc)},
+            )
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -140,3 +156,6 @@ async def video(url: str, request: Request, _=Depends(require_api_key)):
             yield chunk
 
     return StreamingResponse(streamer(), media_type=f"video/{ext}")
+
+
+app.get("/video")(media)
